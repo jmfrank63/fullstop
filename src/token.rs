@@ -6,10 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::Deref;
 use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
-use prelude::LetterCase;
+use crate::prelude::LetterCase;
 
 // These 6 flags only use the lower 8 bits.
 const HAS_FINAL_PERIOD: u16 = 0b0000000000000001;
@@ -27,6 +27,7 @@ const IS_NUMERIC: u16 = 0b0100000000000000;
 const IS_NON_PUNCT: u16 = 0b0010000000000000;
 const IS_ALPHABETIC: u16 = 0b0000010000000000;
 
+/// A token with various flags indicating its properties
 #[derive(Eq)]
 pub struct Token {
   inner: String,
@@ -34,15 +35,19 @@ pub struct Token {
 }
 
 impl Token {
+  /// Create a new token from a string slice
   pub fn new(slice: &str, is_el: bool, is_pg: bool, is_nl: bool) -> Token {
-    debug_assert!(slice.len() > 0);
+    debug_assert!(
+      !slice.is_empty(),
+      "Token cannot be created from an empty string"
+    );
 
-    let first = slice.chars().nth(0).unwrap();
+    let first = slice.chars().next().unwrap();
     let mut has_punct = false;
 
     // Add a period to any tokens without a period. This is an optimization
     // to avoid creating an entirely new token when using as a key.
-    let mut tok = if slice.as_bytes()[slice.len() - 1] == b'.' {
+    let mut tok = if slice.ends_with('.') {
       let mut tok = Token {
         inner: String::with_capacity(slice.len()),
         flags: 0x00,
@@ -64,13 +69,12 @@ impl Token {
     }
 
     for c in slice.chars() {
-      for c0 in c.to_lowercase() {
-        tok.inner.push(c0);
-      }
+      // Add lowercase version of the character
+      tok.inner.extend(c.to_lowercase());
 
       if c.is_alphabetic() || c == '_' {
         tok.set_is_non_punct(true);
-      } else if !c.is_digit(10) {
+      } else if !c.is_ascii_digit() {
         has_punct = true;
       }
     }
@@ -95,20 +99,20 @@ impl Token {
 
   /// Returns the normalized original token (which can be reconstructed from
   /// the inner representation of the token, and the flags on the token).
-  #[inline(always)]
+  #[inline]
   pub fn tok(&self) -> &str {
     if self.has_final_period() {
-      &self.inner[..]
+      &self.inner
     } else {
       &self.inner[..self.inner.len() - 1]
     }
   }
 
   /// Returns the token with any ending period truncated.
-  #[inline(always)]
+  #[inline]
   pub fn tok_without_period(&self) -> &str {
     if self.has_final_period() {
-      &self.tok()[..self.len() - 1]
+      &self.tok()[..self.tok().len() - 1]
     } else {
       self.tok()
     }
@@ -346,21 +350,21 @@ impl Token {
 impl Deref for Token {
   type Target = str;
 
-  #[inline(always)]
+  #[inline]
   fn deref(&self) -> &str {
-    &self.inner[..]
+    &self.inner
   }
 }
 
 impl PartialEq for Token {
-  #[inline(always)]
+  #[inline]
   fn eq(&self, other: &Token) -> bool {
     self.typ() == other.typ()
   }
 }
 
 impl Hash for Token {
-  #[inline(always)]
+  #[inline]
   fn hash<H>(&self, state: &mut H)
   where
     H: Hasher,
@@ -384,8 +388,8 @@ fn is_str_numeric(tok: &str) -> bool {
     match c {
       // A digit was found. Note this to confirm later if punctuation
       // within the number is valid or not.
-      _ if c.is_digit(10) => digit_found = true,
-      // A delimeter was found. This is valid as long as
+      c if c.is_ascii_digit() => digit_found = true,
+      // A delimiter was found. This is valid as long as
       // a digit was also found prior.
       ',' | '.' | '-' if digit_found => (),
       // A comma or period was found as the first character, or
@@ -409,44 +413,47 @@ fn is_str_numeric(tok: &str) -> bool {
 /// next is a period.
 #[inline]
 fn is_str_initial(tok: &str) -> bool {
-  let mut iter = tok.chars();
+  let mut chars = tok.chars();
 
-  match (iter.next(), iter.next()) {
-    (Some(c), Some('.')) if c.is_alphabetic() => iter.next().is_none(),
+  match (chars.next(), chars.next()) {
+    (Some(c), Some('.')) if c.is_alphabetic() => chars.next().is_none(),
     _ => false,
   }
 }
 
-#[test]
-fn test_token_flags() {
-  macro_rules! perform_flag_test(
-    ($tok:expr, $f:ident, $t:ident) => (
-      {
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_token_flags() {
+    macro_rules! perform_flag_test {
+      ($tok:expr, $f:ident, $t:ident) => {{
         $tok.$f(true);
         assert!($tok.$t());
         $tok.$f(false);
         assert!(!$tok.$t());
-      }
-    )
-  );
+      }};
+    }
 
-  let mut tok = Token::new("test", false, false, false);
+    let mut tok = Token::new("test", false, false, false);
 
-  tok.set_is_non_punct(false);
-  tok.set_is_lowercase(false);
-  tok.set_is_alphabetic(false);
+    tok.set_is_non_punct(false);
+    tok.set_is_lowercase(false);
+    tok.set_is_alphabetic(false);
 
-  assert_eq!(tok.flags, 0);
+    assert_eq!(tok.flags, 0);
 
-  perform_flag_test!(tok, set_is_ellipsis, is_ellipsis);
-  perform_flag_test!(tok, set_is_abbrev, is_abbrev);
-  perform_flag_test!(tok, set_has_final_period, has_final_period);
-  perform_flag_test!(tok, set_is_paragraph_start, is_paragraph_start);
-  perform_flag_test!(tok, set_is_newline_start, is_newline_start);
-  perform_flag_test!(tok, set_is_uppercase, is_uppercase);
-  perform_flag_test!(tok, set_is_lowercase, is_lowercase);
-  perform_flag_test!(tok, set_is_numeric, is_numeric);
-  perform_flag_test!(tok, set_is_initial, is_initial);
-  perform_flag_test!(tok, set_is_non_punct, is_non_punct);
-  perform_flag_test!(tok, set_is_alphabetic, is_alphabetic);
+    perform_flag_test!(tok, set_is_ellipsis, is_ellipsis);
+    perform_flag_test!(tok, set_is_abbrev, is_abbrev);
+    perform_flag_test!(tok, set_has_final_period, has_final_period);
+    perform_flag_test!(tok, set_is_paragraph_start, is_paragraph_start);
+    perform_flag_test!(tok, set_is_newline_start, is_newline_start);
+    perform_flag_test!(tok, set_is_uppercase, is_uppercase);
+    perform_flag_test!(tok, set_is_lowercase, is_lowercase);
+    perform_flag_test!(tok, set_is_numeric, is_numeric);
+    perform_flag_test!(tok, set_is_initial, is_initial);
+    perform_flag_test!(tok, set_is_non_punct, is_non_punct);
+    perform_flag_test!(tok, set_is_alphabetic, is_alphabetic);
+  }
 }

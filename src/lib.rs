@@ -137,43 +137,31 @@
 //! }
 //! ```
 
-#![cfg_attr(test, feature(test))]
-#![feature(proc_macro_hygiene)]
-#![warn(missing_docs)]
-
-extern crate freqdist;
-extern crate num;
-extern crate phf;
-extern crate rustc_serialize;
-#[cfg(test)]
-extern crate test;
-#[cfg(test)]
-extern crate walkdir;
-
-mod trainer;
-mod util;
+mod freq_dist;
+mod prelude;
 mod token;
 mod tokenizer;
-mod prelude;
+mod trainer;
+mod util;
 
-pub use trainer::{Trainer, TrainingData};
+pub use tokenizer::WordTokenizer;
 pub use tokenizer::{SentenceByteOffsetTokenizer, SentenceTokenizer};
+pub use trainer::{Trainer, TrainingData};
 
 /// Contains traits for configuring all tokenizers, and the trainer. Also
 /// contains default parameters for tokenizers, and the trainer.
 pub mod params {
-  pub use prelude::{DefinesInternalPunctuation, DefinesNonPrefixCharacters,
-                    DefinesNonWordCharacters, DefinesPunctuation, DefinesSentenceEndings, Set,
-                    Standard, TrainerParameters};
+  pub use crate::prelude::{
+    DefinesInternalPunctuation, DefinesNonPrefixCharacters, DefinesNonWordCharacters,
+    DefinesPunctuation, DefinesSentenceEndings, Set, Standard, TrainerParameters,
+  };
 }
 
 #[cfg(test)]
 fn get_test_scenarios(dir_path: &str, raw_path: &str) -> Vec<(Vec<String>, String, String)> {
-  #![allow(unused_must_use)]
-
   use std::fs;
-  use std::path::Path;
   use std::io::Read;
+  use std::path::Path;
 
   use walkdir::WalkDir;
 
@@ -192,9 +180,13 @@ fn get_test_scenarios(dir_path: &str, raw_path: &str) -> Vec<(Vec<String>, Strin
       let rawp = Path::new(raw_path).join(fpath.file_name().unwrap());
 
       fs::File::open(&fpath)
-        .unwrap()
-        .read_to_string(&mut exp_strb);
-      fs::File::open(&rawp).unwrap().read_to_string(&mut raw_strb);
+        .expect("Failed to open a file")
+        .read_to_string(&mut exp_strb)
+        .expect("Failed to read to string");
+      fs::File::open(&rawp)
+        .expect("Failed to open a file")
+        .read_to_string(&mut raw_strb)
+        .expect("Failed to read to string");
 
       // Expected results, split by newlines.
       let exps: Vec<String> = exp_strb.split('\n').map(|s| s.to_string()).collect();

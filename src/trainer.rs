@@ -6,6 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
@@ -14,16 +15,15 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use freqdist::FrequencyDistribution;
-use rustc_serialize::json::Json;
+use serde_json::Value;
 
-use prelude::{
+use crate::freq_dist::FrequencyDistribution;
+use crate::prelude::{
   DefinesNonPrefixCharacters, DefinesNonWordCharacters, OrthographicContext, OrthographyPosition,
   TrainerParameters,
 };
-use token::Token;
-use tokenizer::WordTokenizer;
-use util;
+use crate::token::Token;
+use crate::tokenizer::WordTokenizer;
 
 /// A collocation is any pair of words that has a high likelihood of appearing
 /// together.
@@ -40,17 +40,20 @@ impl<T> Collocation<T>
 where
   T: Deref<Target = Token>,
 {
-  #[inline(always)]
+  /// Create a new collocation from two tokens
+  #[inline]
   pub fn new(l: T, r: T) -> Collocation<T> {
-    Collocation { l: l, r: r }
+    Collocation { l, r }
   }
 
-  #[inline(always)]
+  /// Returns the left token of the collocation
+  #[inline]
   pub fn left(&self) -> &T {
     &self.l
   }
 
-  #[inline(always)]
+  /// Returns the right token of the collocation
+  #[inline]
   pub fn right(&self) -> &T {
     &self.r
   }
@@ -60,7 +63,7 @@ impl<T> Hash for Collocation<T>
 where
   T: Deref<Target = Token>,
 {
-  #[inline(always)]
+  #[inline]
   fn hash<H>(&self, state: &mut H)
   where
     H: Hasher,
@@ -74,7 +77,7 @@ impl<T> PartialEq for Collocation<T>
 where
   T: Deref<Target = Token>,
 {
-  #[inline(always)]
+  #[inline]
   fn eq(&self, x: &Collocation<T>) -> bool {
     (*self.l).typ_without_period() == (*x.l).typ_without_period()
       && (*self.r).typ_without_break_or_period() == (*x.r).typ_without_break_or_period()
@@ -106,7 +109,7 @@ pub struct TrainingData {
 
 impl TrainingData {
   /// Creates a new, empty data object.
-  #[inline(always)]
+  #[inline]
   pub fn new() -> TrainingData {
     TrainingData {
       ..Default::default()
@@ -114,7 +117,7 @@ impl TrainingData {
   }
 
   /// Check if a token is considered to be an abbreviation.
-  #[inline(always)]
+  #[inline]
   pub fn contains_abbrev(&self, tok: &str) -> bool {
     self.abbrevs.contains(tok)
   }
@@ -137,7 +140,7 @@ impl TrainingData {
 
   /// Check if a token is considered to be a token that commonly starts a
   /// sentence.
-  #[inline(always)]
+  #[inline]
   pub fn contains_sentence_starter(&self, tok: &str) -> bool {
     self.sentence_starters.contains(tok)
   }
@@ -184,14 +187,9 @@ impl TrainingData {
   /// appears in.
   #[inline]
   fn insert_orthographic_context(&mut self, tok: &str, ctxt: OrthographicContext) -> bool {
-    // `get_mut` isn't allowed here, without adding an unnecessary lifetime
-    // qualifier to `tok`.
-    match self.orthographic_context.get_mut(tok) {
-      Some(c) => {
-        *c |= ctxt;
-        return false;
-      }
-      None => (),
+    if let Some(c) = self.orthographic_context.get_mut(tok) {
+      *c |= ctxt;
+      return false;
     }
 
     self.orthographic_context.insert(tok.to_string(), ctxt);
@@ -200,7 +198,7 @@ impl TrainingData {
 
   /// Gets the orthographic context for a token. Returns 0 if the token
   /// was not yet encountered.
-  #[inline(always)]
+  #[inline]
   pub fn get_orthographic_context(&self, tok: &str) -> u8 {
     *self.orthographic_context.get(tok).unwrap_or(&0)
   }
@@ -211,68 +209,62 @@ impl FromStr for TrainingData {
 
   /// Deserializes JSON and loads the data into a new TrainingData object.
   fn from_str(s: &str) -> Result<TrainingData, &'static str> {
-    match Json::from_str(s) {
-      Ok(Json::Object(mut obj)) => {
-        let mut data: TrainingData = Default::default();
+    let json: Value = serde_json::from_str(s).map_err(|_| "failed to parse JSON")?;
+    let mut data = TrainingData::default();
 
-        // Macro that gets a Json array by a path on the object. Then does a
-        // pattern match on a specified pattern, and runs a specified action.
-        macro_rules! read_json_array_data(
-          ($path:expr, $mtch:pat, $act:expr) => (
-            match obj.remove($path) {
-              Some(Json::Array(arr)) => {
-                for x in arr.into_iter() {
-                  match x {
-                    $mtch => { $act; }
-                        _ => ()
-                  }
-                }
-              }
-              _ => return Err("failed to parse expected path")
-            }
-          );
-        );
+    // Parse abbreviations
+    if let Some(abbrevs) = json.get("abbrev_types").and_then(|v| v.as_array()) {
+      for abbrev in abbrevs {
+        if let Some(abbrev_str) = abbrev.as_str() {
+          data.insert_abbrev(abbrev_str);
+        }
+      }
+    } else {
+      return Err("failed to parse expected abbrev_types");
+    }
 
-        read_json_array_data!(
-          "abbrev_types",
-          Json::String(st),
-          data.insert_abbrev(&st[..])
-        );
+    // Parse sentence starters
+    if let Some(starters) = json.get("sentence_starters").and_then(|v| v.as_array()) {
+      for starter in starters {
+        if let Some(starter_str) = starter.as_str() {
+          data.insert_sentence_starter(starter_str);
+        }
+      }
+    } else {
+      return Err("failed to parse expected sentence_starters");
+    }
 
-        read_json_array_data!(
-          "sentence_starters",
-          Json::String(st),
-          data.insert_sentence_starter(&st[..])
-        );
-
-        // Load collocations, these come as an array with 2 members in them (or they should).
-        // Pop them in reverse order, then insert into the proper bucket.
-        read_json_array_data!("collocations", Json::Array(mut ar), {
-          match (ar.pop(), ar.pop()) {
-            (Some(Json::String(r)), Some(Json::String(l))) => data
-              .collocations
-              .entry(l)
-              .or_insert(HashSet::new())
-              .insert(r),
-            _ => return Err("failed to parse collocations section"),
-          };
-        });
-
-        match obj.remove("ortho_context") {
-          Some(Json::Object(obj)) => {
-            for (k, ctxt) in obj.into_iter() {
-              ctxt
-                .as_u64()
-                .map(|c| data.orthographic_context.insert(k, c as u8));
+    // Parse collocations
+    if let Some(collocations) = json.get("collocations").and_then(|v| v.as_array()) {
+      for collocation in collocations {
+        if let Some(coll_array) = collocation.as_array() {
+          if coll_array.len() >= 2 {
+            if let (Some(left), Some(right)) = (coll_array[0].as_str(), coll_array[1].as_str()) {
+              data
+                .collocations
+                .entry(left.to_string())
+                .or_insert_with(HashSet::new)
+                .insert(right.to_string());
             }
           }
-          _ => return Err("failed to parse orthographic context section"),
         }
-
-        Ok(data)
       }
-      _ => Err("no json object found containing training data"),
+    } else {
+      return Err("failed to parse collocations section");
     }
+
+    // Parse orthographic context
+    if let Some(contexts) = json.get("ortho_context").and_then(|v| v.as_object()) {
+      for (key, value) in contexts {
+        if let Some(context) = value.as_u64() {
+          data.orthographic_context.insert(key.clone(), context as u8);
+        }
+      }
+    } else {
+      return Err("failed to parse orthographic context section");
+    }
+
+    Ok(data)
   }
 }
 
@@ -289,7 +281,7 @@ where
   P: TrainerParameters + DefinesNonPrefixCharacters + DefinesNonWordCharacters,
 {
   /// Creates a new Trainer.
-  #[inline(always)]
+  #[inline]
   pub fn new() -> Trainer<P> {
     Trainer {
       params: PhantomData,
@@ -300,25 +292,38 @@ where
   pub fn train(&self, doc: &str, data: &mut TrainingData) {
     let mut period_token_count: usize = 0;
     let mut sentence_break_count: usize = 0;
-    let tokens: Vec<Token> = WordTokenizer::<P>::new(doc).collect();
-    let mut type_fdist: FrequencyDistribution<&str> = FrequencyDistribution::new();
-    let mut collocation_fdist = FrequencyDistribution::new();
-    let mut sentence_starter_fdist = FrequencyDistribution::new();
 
-    for t in tokens.iter() {
-      if t.has_final_period() {
-        period_token_count += 1
+    // Collect tokens and wrap them in UnsafeCell for interior mutability
+    let tokens_raw: Vec<Token> = WordTokenizer::<P>::new(doc).collect();
+    // Pre-allocate UnsafeCell vector with capacity
+    let mut tokens: Vec<UnsafeCell<Token>> = Vec::with_capacity(tokens_raw.len());
+    for token in tokens_raw {
+      // wrap in UnsafeCell for mutability
+      tokens.push(UnsafeCell::new(token));
+    }
+    let mut type_fdist: FrequencyDistribution<&str> = FrequencyDistribution::new();
+    let mut collocation_fdist: FrequencyDistribution<Collocation<&Token>> =
+      FrequencyDistribution::new();
+    let mut sentence_starter_fdist: FrequencyDistribution<&Token> = FrequencyDistribution::new();
+
+    // Count tokens and build frequency distribution
+    for token_cell in &tokens {
+      let token = unsafe { &*token_cell.get() };
+      if token.has_final_period() {
+        period_token_count += 1;
       }
-      type_fdist.insert(t.typ());
+      type_fdist.insert(token.typ());
     }
 
-    // Iterate through to see if any tokens need to be reclassified as an
-    // abbreviation or removed as an abbreviation.
+    // Reclassify tokens as abbreviations if needed
     {
+      // Create references to tokens for the iterator
+      let token_refs: Vec<&Token> = tokens.iter().map(|cell| unsafe { &*cell.get() }).collect();
+
       let reclassify_iter: ReclassifyIterator<_, P> = ReclassifyIterator {
-        iter: tokens.iter(),
-        data: data,
-        period_token_count: period_token_count,
+        iter: token_refs.iter().copied(),
+        data,
+        period_token_count,
         type_fdist: &mut type_fdist,
         params: PhantomData,
       };
@@ -326,34 +331,38 @@ where
       for (t, score) in reclassify_iter {
         if score >= P::ABBREV_LOWER_BOUND {
           if t.has_final_period() {
+            // Need to mutate data while it's borrowed by the iterator
+            // This is safe because we're only modifying a HashSet within data
+            // which doesn't affect the iteration
             unsafe {
-              (&mut *(data as *const TrainingData as *mut TrainingData))
-                .insert_abbrev(t.typ_without_period());
+              let data_mut = &mut *(data as *const TrainingData as *mut TrainingData);
+              data_mut.insert_abbrev(t.typ_without_period());
             }
           }
-        } else {
-          if !t.has_final_period() {
-            unsafe {
-              (&mut *(data as *const TrainingData as *mut TrainingData))
-                .remove_abbrev(t.typ_without_period());
-            }
+        } else if !t.has_final_period() {
+          unsafe {
+            let data_mut = &mut *(data as *const TrainingData as *mut TrainingData);
+            data_mut.remove_abbrev(t.typ_without_period());
           }
         }
       }
     }
 
-    // Annotating the tokens requires an unsafe block, but it won't modify any pointers,
-    // just will modify some flags on the tokens.
-    for t in tokens.iter() {
+    // First pass annotation - using UnsafeCell to mutate tokens safely
+    for token_cell in &tokens {
       unsafe {
-        util::annotate_first_pass::<P>(&mut *(t as *const Token as *mut Token), data);
+        let token_mut = &mut *token_cell.get();
+        crate::util::annotate_first_pass::<P>(token_mut, data);
       }
     }
 
-    // Update or insert the orthographic context of all tokens in the document.
+    // Update orthographic context
     {
+      // Create references to tokens for the iterator
+      let token_refs: Vec<&Token> = tokens.iter().map(|cell| unsafe { &*cell.get() }).collect();
+
       let token_with_context_iter = TokenWithContextIterator {
-        iter: tokens.iter(),
+        iter: token_refs.iter().copied(),
         ctxt: OrthographyPosition::Internal,
       };
 
@@ -364,26 +373,28 @@ where
       }
     }
 
-    // Order matters! Sentence break checks are dependent on whether or not
-    // the token is an abbreviation. Must come after the first pass annotation!
-    for t in tokens.iter() {
-      if t.is_sentence_break() {
+    // Count sentence breaks
+    for token_cell in &tokens {
+      let token = unsafe { &*token_cell.get() };
+      if token.is_sentence_break() {
         sentence_break_count += 1;
       }
     }
 
-    // Iterate over tokens, and determine if they're abbreviations or if they
-    // are potential sentence starters or potential collocations.
+    // Find potential collocations and sentence starters
     {
+      // Create references to tokens for the iterator
+      let token_refs: Vec<&Token> = tokens.iter().map(|cell| unsafe { &*cell.get() }).collect();
+
       let consecutive_token_iter = ConsecutiveItemIterator {
-        iter: tokens.iter(),
+        iter: token_refs.iter().copied(),
         last: None,
       };
 
       for (lt, rt) in consecutive_token_iter {
-        match rt {
-          Some(cur) if lt.has_final_period() => {
-            if is_rare_abbrev_type::<P>(&data, &type_fdist, lt, cur) {
+        if let Some(cur) = rt {
+          if lt.has_final_period() {
+            if is_rare_abbrev_type::<P>(data, &type_fdist, lt, cur) {
               data.insert_abbrev(lt.typ_without_period());
             }
 
@@ -395,15 +406,15 @@ where
               collocation_fdist.insert(Collocation::new(lt, cur));
             }
           }
-          _ => (),
         }
       }
     }
 
+    // Process sentence starters
     {
       let ss_iter: PotentialSentenceStartersIterator<_, P> = PotentialSentenceStartersIterator {
         iter: sentence_starter_fdist.keys(),
-        sentence_break_count: sentence_break_count,
+        sentence_break_count,
         type_fdist: &type_fdist,
         sentence_starter_fdist: &sentence_starter_fdist,
         params: PhantomData,
@@ -414,24 +425,38 @@ where
       }
     }
 
+    // Process collocations
     {
       let clc_iter: PotentialCollocationsIterator<_, P> = PotentialCollocationsIterator {
         iter: collocation_fdist.keys(),
-        data: &data,
+        data,
         type_fdist: &type_fdist,
         collocation_fdist: &collocation_fdist,
         params: PhantomData,
       };
 
       for (col, _) in clc_iter {
+        // Need to mutate data while it's borrowed by the iterator
+        // This is safe because we're only modifying a HashMap within data
+        // which doesn't affect the iteration
         unsafe {
-          (&mut *(data as *const TrainingData as *mut TrainingData)).insert_collocation(
+          let data_mut = &mut *(data as *const TrainingData as *mut TrainingData);
+          data_mut.insert_collocation(
             col.left().typ_without_period(),
             col.right().typ_without_break_or_period(),
           );
         }
       }
     }
+  }
+}
+
+impl<P> Default for Trainer<P>
+where
+  P: TrainerParameters + DefinesNonPrefixCharacters + DefinesNonWordCharacters,
+{
+  fn default() -> Self {
+    Self::new()
   }
 }
 
@@ -444,24 +469,24 @@ fn is_rare_abbrev_type<P>(
 where
   P: TrainerParameters,
 {
-  use prelude::{BEG_UC, MID_UC};
+  use crate::prelude::{BEG_UC, MID_UC};
 
   if tok0.is_abbrev() || !tok0.is_sentence_break() {
     false
   } else {
     let key = tok0.typ_without_break_or_period();
-    let count = (type_fdist[key] + type_fdist[&key[..key.len() - 1]]) as f64;
+    let count = (type_fdist.get(key) + type_fdist.get(&key[..key.len() - 1])) as f64;
 
     // Already an abbreviation...
     if data.contains_abbrev(tok0.typ()) || count >= P::ABBREV_UPPER_BOUND {
       false
-    } else if P::is_internal_punctuation(&tok1.typ().chars().next().unwrap()) {
-      true
-    } else if tok1.is_lowercase() {
-      let ctxt = data.get_orthographic_context(tok1.typ_without_break_or_period());
-
-      if (ctxt & BEG_UC > 0) && !(ctxt & MID_UC > 0) {
+    } else if let Some(c) = tok1.typ().chars().next() {
+      if P::is_internal_punctuation(c) {
         true
+      } else if tok1.is_lowercase() {
+        let ctxt = data.get_orthographic_context(tok1.typ_without_break_or_period());
+
+        (ctxt & BEG_UC > 0) && !(ctxt & MID_UC > 0)
       } else {
         false
       }
@@ -471,12 +496,12 @@ where
   }
 }
 
-#[inline(always)]
+#[inline]
 fn is_potential_sentence_starter(cur: &Token, prev: &Token) -> bool {
   prev.is_sentence_break() && !(prev.is_numeric() || prev.is_initial()) && cur.is_alphabetic()
 }
 
-#[inline(always)]
+#[inline]
 fn is_potential_collocation<P>(tok0: &Token, tok1: &Token) -> bool
 where
   P: TrainerParameters,
@@ -508,7 +533,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    while let Some(t) = self.iter.next() {
+    for t in self.iter.by_ref() {
       if !t.is_non_punct() || t.is_numeric() {
         continue;
       }
@@ -517,10 +542,8 @@ where
         if self.data.contains_abbrev(t.typ()) {
           continue;
         }
-      } else {
-        if !self.data.contains_abbrev(t.typ()) {
-          continue;
-        }
+      } else if !self.data.contains_abbrev(t.typ()) {
+        continue;
       }
 
       let num_periods =
@@ -533,7 +556,7 @@ where
       let count_with_period = self.type_fdist.get(t.typ_with_period());
       let count_without_period = self.type_fdist.get(t.typ_without_period());
 
-      let likelihood = util::dunning_log_likelihood(
+      let likelihood = crate::util::dunning_log_likelihood(
         (count_with_period + count_without_period) as f64,
         self.period_token_count as f64,
         count_with_period as f64,
@@ -579,7 +602,7 @@ where
           self.ctxt = OrthographyPosition::Unknown;
         }
 
-        let flag = *::prelude::ORTHO_MAP
+        let flag = *crate::prelude::ORTHO_MAP
           .get(&(self.ctxt.as_byte() | t.first_case().as_byte()))
           .unwrap_or(&0);
 
@@ -610,7 +633,7 @@ struct PotentialCollocationsIterator<'b, I, P> {
   params: PhantomData<P>,
 }
 
-impl<'a, 'b, I, P> Iterator for PotentialCollocationsIterator<'b, I, P>
+impl<'a, I, P> Iterator for PotentialCollocationsIterator<'_, I, P>
 where
   I: Iterator<Item = &'a Collocation<&'a Token>>,
   P: TrainerParameters,
@@ -619,7 +642,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<(&'a Collocation<&'a Token>, f64)> {
-    while let Some(col) = self.iter.next() {
+    for col in self.iter.by_ref() {
       if self
         .data
         .contains_sentence_starter(col.right().typ_without_break_or_period())
@@ -639,7 +662,7 @@ where
         && P::COLLOCATION_FREQUENCY_LOWER_BOUND < count as f64
         && count <= min(left_count, right_count)
       {
-        let likelihood = util::col_log_likelihood(
+        let likelihood = crate::util::col_log_likelihood(
           left_count as f64,
           right_count as f64,
           count as f64,
@@ -667,7 +690,7 @@ struct PotentialSentenceStartersIterator<'b, I, P> {
   params: PhantomData<P>,
 }
 
-impl<'a, 'b, I, P> Iterator for PotentialSentenceStartersIterator<'b, I, P>
+impl<'a, I, P> Iterator for PotentialSentenceStartersIterator<'_, I, P>
 where
   I: Iterator<Item = &'a &'a Token>,
   P: TrainerParameters,
@@ -676,7 +699,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<(&'a Token, f64)> {
-    while let Some(tok) = self.iter.next() {
+    for tok in self.iter.by_ref() {
       let ss_count = self.sentence_starter_fdist.get(tok);
       let typ_count =
         self.type_fdist.get(tok.typ_with_period()) + self.type_fdist.get(tok.typ_without_period());
@@ -685,7 +708,7 @@ where
         continue;
       }
 
-      let likelihood = util::col_log_likelihood(
+      let likelihood = crate::util::col_log_likelihood(
         self.sentence_break_count as f64,
         typ_count as f64,
         ss_count as f64,
@@ -739,13 +762,15 @@ where
 
 // Macro for generating functions to load precompiled data.
 macro_rules! preloaded_data(
-  ($lang:ident, $file:expr) => (
-    impl TrainingData {
-      #[inline] #[allow(missing_docs)] pub fn $lang() -> TrainingData {
-        FromStr::from_str(include_str!($file)).unwrap()
-      }
-    }
-  )
+    ($lang:ident, $file:expr) => (
+        impl TrainingData {
+            #[inline]
+            /// Load precompiled data for a specific language
+            pub fn $lang() -> TrainingData {
+                FromStr::from_str(include_str!($file)).unwrap()
+            }
+        }
+    )
 );
 
 preloaded_data!(czech, "data/czech.json");
@@ -766,53 +791,20 @@ preloaded_data!(spanish, "data/spanish.json");
 preloaded_data!(swedish, "data/swedish.json");
 preloaded_data!(turkish, "data/turkish.json");
 
-#[test]
-fn test_data_load_from_json_test() {
-  let data: TrainingData = TrainingData::english();
+#[cfg(test)]
+mod tests {
+  use super::*;
 
-  assert!(data.orthographic_context.len() > 0);
-  assert!(data.abbrevs.len() > 0);
-  assert!(data.sentence_starters.len() > 0);
-  assert!(data.collocations.len() > 0);
-  assert!(data.contains_sentence_starter("among"));
-  assert!(data.contains_abbrev("w.va"));
-  assert!(data.contains_collocation("##number##", "corrections"));
+  #[test]
+  fn test_data_load_from_json_test() {
+    let data: TrainingData = TrainingData::english();
+
+    assert!(!data.orthographic_context.is_empty());
+    assert!(!data.abbrevs.is_empty());
+    assert!(!data.sentence_starters.is_empty());
+    assert!(!data.collocations.is_empty());
+    assert!(data.contains_sentence_starter("among"));
+    assert!(data.contains_abbrev("w.va"));
+    assert!(data.contains_collocation("##number##", "corrections"));
+  }
 }
-
-#[cfg(test)]
-macro_rules! bench_trainer(
-  ($name:ident, $doc:expr) => (
-    #[bench] fn $name(b: &mut ::test::Bencher) {
-      b.iter(|| {
-        let mut data = TrainingData::new();
-        let trainer: Trainer<::prelude::Standard> = Trainer::new();
-
-        trainer.train($doc, &mut data);
-      })
-    }
-  )
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_short,
-  include_str!("../test/raw/sigma-wiki.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_medium,
-  include_str!("../test/raw/npr-article-01.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_long,
-  include_str!("../test/raw/the-sayings-of-confucius.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_very_long,
-  include_str!("../test/raw/pride-and-prejudice.txt")
-);

@@ -18,8 +18,8 @@ pub trait DefinesSentenceEndings {
 
   /// Checks if a character is a sentence ending.
   #[inline]
-  fn is_sentence_ending(c: &char) -> bool {
-    Self::SENTENCE_ENDINGS.contains(c)
+  fn is_sentence_ending(c: char) -> bool {
+    Self::SENTENCE_ENDINGS.contains(&c)
   }
 }
 
@@ -31,22 +31,21 @@ pub trait DefinesInternalPunctuation {
   /// Checks if a character is a legal punctuation character that can occur
   /// within a word.
   #[inline]
-  fn is_internal_punctuation(c: &char) -> bool {
-    Self::INTERNAL_PUNCTUATION.contains(c)
+  fn is_internal_punctuation(c: char) -> bool {
+    Self::INTERNAL_PUNCTUATION.contains(&c)
   }
 }
 
 /// Defines a set of characters that can not occur inside of a word.
 pub trait DefinesNonWordCharacters {
   /// The set of characters that can not occur inside of a word.
-  const NONWORD_CHARS: &'static Set<char> = &phf_set![
-    '?', '!', ')', '"', ';', '}', ']', '*', ':', '@', '\'', '(', '{', '['
-  ];
+  const NONWORD_CHARS: &'static Set<char> =
+    &phf_set!['?', '!', ')', '"', ';', '}', ']', '*', ':', '@', '\'', '(', '{', '['];
 
   /// Checks if a character is one that can not occur inside of a word.
   #[inline]
-  fn is_nonword_char(c: &char) -> bool {
-    Self::NONWORD_CHARS.contains(c)
+  fn is_nonword_char(c: char) -> bool {
+    Self::NONWORD_CHARS.contains(&c)
   }
 }
 
@@ -55,24 +54,23 @@ pub trait DefinesPunctuation {
   /// The set of legal punctuation marks.
   const PUNCTUATION: &'static Set<char> = &phf_set![';', ':', ',', '.', '!', '?'];
 
-  /// Checks if a characters is a legal punctuation mark.
+  /// Checks if a character is a legal punctuation mark.
   #[inline]
-  fn is_punctuation(c: &char) -> bool {
-    Self::PUNCTUATION.contains(c)
+  fn is_punctuation(c: char) -> bool {
+    Self::PUNCTUATION.contains(&c)
   }
 }
 
 /// Defines a set of a characters that can not start a word.
 pub trait DefinesNonPrefixCharacters {
   /// The set of characters that can not start a word.
-  const NONPREFIX_CHARS: &'static Set<char> = &phf_set![
-    '(', '"', '`', '{', '[', ':', ';', '&', '#', '*', '@', ')', '}', ']', '-', ','
-  ];
+  const NONPREFIX_CHARS: &'static Set<char> =
+    &phf_set!['(', '"', '`', '{', '[', ':', ';', '&', '#', '*', '@', ')', '}', ']', '-', ','];
 
   /// Checks if a character can start a word.
   #[inline]
-  fn is_nonprefix_char(c: &char) -> bool {
-    Self::NONPREFIX_CHARS.contains(c)
+  fn is_nonprefix_char(c: char) -> bool {
+    Self::NONPREFIX_CHARS.contains(&c)
   }
 }
 
@@ -84,7 +82,7 @@ pub trait TrainerParameters: DefinesSentenceEndings + DefinesInternalPunctuation
   /// Upper bound score for a token to be considered an abbreviation.
   const ABBREV_UPPER_BOUND: f64 = 5f64;
 
-  /// Disables the abbreviation penalty which exponentially penalizes occurances
+  /// Disables the abbreviation penalty which exponentially penalizes occurrences
   /// of words without a trailing period.
   const IGNORE_ABBREV_PENALTY: bool = false;
 
@@ -107,8 +105,10 @@ pub trait TrainerParameters: DefinesSentenceEndings + DefinesInternalPunctuation
 }
 
 /// Standard settings for all tokenizers, and trainers.
+#[derive(Debug, Clone, Copy)]
 pub struct Standard;
 
+// Use blanket implementations for Standard
 impl DefinesInternalPunctuation for Standard {}
 impl DefinesNonPrefixCharacters for Standard {}
 impl DefinesNonWordCharacters for Standard {}
@@ -116,9 +116,11 @@ impl DefinesPunctuation for Standard {}
 impl DefinesSentenceEndings for Standard {}
 impl TrainerParameters for Standard {}
 
+/// Orthographic context type
 pub type OrthographicContext = u8;
 
-#[derive(PartialEq, Eq)]
+/// Position in orthography
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrthographyPosition {
   Initial,
   Internal,
@@ -126,6 +128,8 @@ pub enum OrthographyPosition {
 }
 
 impl OrthographyPosition {
+  /// Convert to byte representation
+  #[inline]
   pub fn as_byte(&self) -> u8 {
     match *self {
       OrthographyPosition::Initial => 0b01000000,
@@ -149,14 +153,16 @@ pub const ORT_LC: OrthographicContext = BEG_LC | MID_LC | UNK_LC;
 /// token. The chars (in ASCII) map to the result of ORing the byte
 /// representation of an OrthographyPosition and LetterCase together.
 pub static ORTHO_MAP: phf::Map<u8, OrthographicContext> = phf_map! {
-  b'B' => BEG_UC, // 66
-  b'"' => MID_UC, // 34
-  b'b' => UNK_UC, // 98
-  b'A' => BEG_LC, // 65
-  b'!' => MID_LC, // 33
-  b'a' => UNK_LC  // 97
+    b'B' => BEG_UC, // 66
+    b'"' => MID_UC, // 34
+    b'b' => UNK_UC, // 98
+    b'A' => BEG_LC, // 65
+    b'!' => MID_LC, // 33
+    b'a' => UNK_LC  // 97
 };
 
+/// Case of a letter
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LetterCase {
   Upper,
   Lower,
@@ -164,7 +170,7 @@ pub enum LetterCase {
 }
 
 impl LetterCase {
-  #[inline(always)]
+  #[inline]
   pub fn as_byte(&self) -> u8 {
     match *self {
       LetterCase::Upper => 0b00000010,

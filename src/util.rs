@@ -6,29 +6,31 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use token::Token;
-use trainer::TrainingData;
-use prelude::DefinesSentenceEndings;
+use crate::prelude::DefinesSentenceEndings;
+use crate::token::Token;
+use crate::trainer::TrainingData;
 
 use num::Float;
 
 /// Peforms a first pass annotation on a Token.
 pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &mut Token, data: &TrainingData) {
+  // Check if there's a dash and, if so, determine whether the part after it is an abbreviation.
   let is_split_abbrev = tok
-    .tok()
-    .rsplitn(1, '-')
-    .next()
-    .map(|s| data.contains_abbrev(s))
-    .unwrap_or(false);
+      .tok()
+      .rsplit_once('-')
+      .map(|(_, part)| data.contains_abbrev(part))
+      .unwrap_or(false);
 
-  if tok.tok().len() == 1 && P::is_sentence_ending(&tok.tok().chars().nth(0).unwrap()) {
-    tok.set_is_sentence_break(true);
-  } else if tok.has_final_period() && !tok.is_ellipsis() {
-    if is_split_abbrev || data.contains_abbrev(tok.tok_without_period()) {
-      tok.set_is_abbrev(true);
-    } else {
+  if tok.tok().len() == 1 && P::is_sentence_ending(tok.tok().chars().next().unwrap()) {
       tok.set_is_sentence_break(true);
-    }
+  } else if tok.has_final_period() && !tok.is_ellipsis() {
+      // Changed logic for better abbreviation handling.
+      if is_split_abbrev || data.contains_abbrev(tok.tok_without_period()) {
+          tok.set_is_abbrev(true);
+          // Don't automatically set is_sentence_break here.
+      } else {
+          tok.set_is_sentence_break(true);
+      }
   }
 }
 

@@ -1,7 +1,5 @@
-extern crate punkt;
-
-use punkt::{SentenceTokenizer, Trainer, TrainingData};
 use punkt::params::Standard;
+use punkt::{SentenceTokenizer, Trainer, TrainingData};
 
 fn main() {
   let docs = [
