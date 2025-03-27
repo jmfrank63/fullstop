@@ -15,74 +15,74 @@ use std::ops::Index;
 #[derive(Debug, Clone)]
 pub struct FrequencyDistribution<T>
 where
-  T: Eq + Hash,
+    T: Eq + Hash,
 {
-  counts: HashMap<T, usize>,
-  total_count: usize,
+    counts: HashMap<T, usize>,
+    total_count: usize,
 }
 
 impl<T> FrequencyDistribution<T>
 where
-  T: Eq + Hash,
+    T: Eq + Hash,
 {
-  /// Creates a new empty frequency distribution.
-  pub fn new() -> Self {
-    FrequencyDistribution {
-      counts: HashMap::new(),
-      total_count: 0,
+    /// Creates a new empty frequency distribution.
+    pub fn new() -> Self {
+        FrequencyDistribution {
+            counts: HashMap::new(),
+            total_count: 0,
+        }
     }
-  }
 
-  /// Adds an item to the frequency distribution, incrementing its count.
-  /// Returns the new count of the item.
-  pub fn insert<U>(&mut self, item: U) -> usize
-  where
-    U: Into<T>,
-  {
-    let item = item.into();
-    let count = self.counts.entry(item).or_insert(0);
-    *count += 1;
-    self.total_count += 1;
-    *count
-  }
+    /// Adds an item to the frequency distribution, incrementing its count.
+    /// Returns the new count of the item.
+    pub fn insert<U>(&mut self, item: U) -> usize
+    where
+        U: Into<T>,
+    {
+        let item = item.into();
+        let count = self.counts.entry(item).or_insert(0);
+        *count += 1;
+        self.total_count += 1;
+        *count
+    }
 
-  /// Gets the frequency of an item.
-  pub fn get<Q>(&self, item: &Q) -> usize
-  where
-    T: std::borrow::Borrow<Q>,
-    Q: Hash + Eq + ?Sized,
-  {
-    self.counts.get(item).copied().unwrap_or(0)
-  }
+    /// Gets the frequency of an item.
+    pub fn get<Q>(&self, item: &Q) -> usize
+    where
+        T: std::borrow::Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.counts.get(item).copied().unwrap_or(0)
+    }
 
-  /// Gets the total number of items counted (sum of all frequencies).
-  pub fn sum_counts(&self) -> usize {
-    self.total_count
-  }
+    /// Gets the total number of items counted (sum of all frequencies).
+    pub fn sum_counts(&self) -> usize {
+        self.total_count
+    }
 
-  /// Returns an iterator over the keys (items) in the distribution.
-  pub fn keys(&self) -> impl Iterator<Item = &T> {
-    self.counts.keys()
-  }
+    /// Returns an iterator over the keys (items) in the distribution.
+    pub fn keys(&self) -> impl Iterator<Item = &T> {
+        self.counts.keys()
+    }
 }
 
 impl<T> Default for FrequencyDistribution<T>
 where
-  T: Eq + Hash,
+    T: Eq + Hash,
 {
-  fn default() -> Self {
-    Self::new()
-  }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T, Q> Index<&Q> for FrequencyDistribution<T>
 where
-  T: Eq + Hash + std::borrow::Borrow<Q>,
-  Q: Hash + Eq + ?Sized,
+    T: Eq + Hash + std::borrow::Borrow<Q>,
+    Q: Hash + Eq + ?Sized,
 {
-  type Output = usize;
+    type Output = usize;
 
-  fn index(&self, key: &Q) -> &Self::Output {
-    self.counts.get(key).unwrap_or(&0)
-  }
+    fn index(&self, key: &Q) -> &Self::Output {
+        self.counts.get(key).unwrap_or(&0)
+    }
 }
