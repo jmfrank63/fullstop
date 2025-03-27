@@ -1,8 +1,8 @@
-# punkt
+# fullstop
 
-[![Build Status](https://travis-ci.org/ferristseng/rust-punkt.svg)](https://travis-ci.org/ferristseng/rust-punkt)
-[![Crates.io](https://img.shields.io/crates/v/punkt.svg)](https://crates.io/crates/punkt)
-[![Docs.rs](https://docs.rs/punkt/badge.svg)](https://docs.rs/punkt/)
+[![Build Status](https://travis-ci.org/ferristseng/rust-fullstop.svg)](https://travis-ci.org/ferristseng/rust-fullstop)
+[![Crates.io](https://img.shields.io/crates/v/fullstop.svg)](https://crates.io/crates/fullstop)
+[![Docs.rs](https://docs.rs/fullstop/badge.svg)](https://docs.rs/fullstop/)
 
 ## Status
 

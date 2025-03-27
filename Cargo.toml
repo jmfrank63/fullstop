@@ -1,10 +1,10 @@
 [package]
-name            = "punkt"
+name            = "fullstop"
 version         = "1.0.6"
 authors         = ["Ferris Tseng <ferristseng@fastmail.fm>"]
-keywords        = ["punkt", "sentence", "token", "tokenizer"]
+keywords        = ["fullstop", "sentence", "token", "tokenizer"]
 license         = "MIT/Apache-2.0"
-repository      = "https://github.com/ferristseng/rust-punkt"
+repository      = "https://github.com/ferristseng/rust-fullstop"
 description     = "An implementation of a Punkt sentence tokenizer"
 readme          = "README.md"
 edition         = "2024"
