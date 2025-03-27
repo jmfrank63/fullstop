@@ -4,10 +4,6 @@
 [![Crates.io](https://img.shields.io/crates/v/fullstop.svg)](https://crates.io/crates/fullstop)
 [![Docs.rs](https://docs.rs/fullstop/badge.svg)](https://docs.rs/fullstop/)
 
-## Status
-
-*I am no longer maintaining this library. Please contact me or create an issue if you would like to become a maintainer.*
-
 ## Overview
 
 Implementation of Tibor Kiss' and Jan Strunk's Punkt algorithm for sentence
