@@ -7,7 +7,7 @@ license         = "MIT/Apache-2.0"
 repository      = "https://github.com/ferristseng/rust-punkt"
 description     = "An implementation of a Punkt sentence tokenizer"
 readme          = "README.md"
-edition         = "2021"
+edition         = "2024"
 
 [dependencies]
 num             = "0.4"
